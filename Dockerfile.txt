@@ -1,0 +1,35 @@
+# --- Base image -------------------------------------------------------
+FROM python:3.10-slim
+
+# Avoid bytecode + ensure stdout is unbuffered
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# System deps for Pillow / torch
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libgl1 libglib2.0-0 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# --- Python deps (cache layer) ---------------------------------------
+COPY requirements.txt .
+# Install CPU-only torch wheels to keep the image small
+RUN pip install --upgrade pip && \
+    pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
+
+# --- Application code ------------------------------------------------
+COPY app/   ./app/
+COPY models/ ./models/
+
+EXPOSE 8000
+
+# Healthcheck hits /health
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -fs http://localhost:8000/health || exit 1
+
+# Run with uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
